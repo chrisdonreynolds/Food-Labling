@@ -15,7 +15,6 @@ import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
-import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.os.Handler;
 import android.os.Looper;
@@ -77,9 +76,6 @@ public class NiimbotB1Printer {
 
         ScanCallback scanCallback = new ScanCallback() {
             @Override
-            public void hints(int filterType, ScanResult result) {}
-
-            @Override
             public void onScanResult(int callbackType, ScanResult result) {
                 BluetoothDevice device = result.getDevice();
                 String name = device.getName();
@@ -96,7 +92,6 @@ public class NiimbotB1Printer {
         };
 
         scanner.startScan(scanCallback);
-        // Timeout scanner after 8 seconds
         mainHandler.postDelayed(() -> {
             try { scanner.stopScan(scanCallback); } catch (Exception ignored) {}
             if (!isConnected) {
@@ -152,7 +147,6 @@ public class NiimbotB1Printer {
                     connectedDeviceName = gatt.getDevice().getName();
                     if (connectedDeviceName == null) connectedDeviceName = "Niimbot B1";
 
-                    // Send Connect handshake packet
                     sendPacket(0xC1, new byte[]{0x01});
                     notifyConnection(true, connectedDeviceName);
                 } else {
@@ -201,8 +195,8 @@ public class NiimbotB1Printer {
     }
 
     public Bitmap generateLabelBitmap(String name, int days, String durationLabel) {
-        int width = 384;  // 48mm @ 203 DPI (B1 printhead width)
-        int height = 240; // 30mm standard height
+        int width = 384;
+        int height = 240;
 
         Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(bitmap);
@@ -217,7 +211,6 @@ public class NiimbotB1Printer {
         borderPaint.setStrokeWidth(1f);
         canvas.drawRect(10, 10, width - 10, height - 10, borderPaint);
 
-        // Header Text: Item Name
         Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         textPaint.setColor(Color.BLACK);
         textPaint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
@@ -231,13 +224,11 @@ public class NiimbotB1Printer {
         }
         canvas.drawText(name, width / 2f, 52, textPaint);
 
-        // Divider
         Paint linePaint = new Paint();
         linePaint.setColor(Color.BLACK);
         linePaint.setStrokeWidth(2f);
         canvas.drawLine(24, 74, width - 24, 74, linePaint);
 
-        // Dates
         SimpleDateFormat sdf = new SimpleDateFormat("MM/dd/yyyy", Locale.US);
         Date now = new Date();
         Calendar cal = Calendar.getInstance();
@@ -252,7 +243,6 @@ public class NiimbotB1Printer {
         textPaint.setTextSize(26f);
         canvas.drawText("Out Date:  " + sdf.format(outDate), 32, 178, textPaint);
 
-        // Duration Tag
         textPaint.setTextAlign(Paint.Align.RIGHT);
         textPaint.setTextSize(16f);
         textPaint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.ITALIC));
@@ -273,23 +263,18 @@ public class NiimbotB1Printer {
                 int width = bitmap.getWidth();
                 int height = bitmap.getHeight();
 
-                // 1. SetDensity: 3
                 sendPacket(0x21, new byte[]{0x03});
                 Thread.sleep(20);
 
-                // 2. SetLabelType: 1 (gap label)
                 sendPacket(0x23, new byte[]{0x01});
                 Thread.sleep(20);
 
-                // 3. PrintStart (7 bytes)
                 sendPacket(0x01, new byte[]{0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00});
                 Thread.sleep(30);
 
-                // 4. PageStart
                 sendPacket(0x03, new byte[]{0x01});
                 Thread.sleep(20);
 
-                // 5. SetPageSize (6 bytes)
                 byte hHi = (byte) ((height >> 8) & 0xFF);
                 byte hLo = (byte) (height & 0xFF);
                 byte wHi = (byte) ((width >> 8) & 0xFF);
@@ -297,7 +282,6 @@ public class NiimbotB1Printer {
                 sendPacket(0x13, new byte[]{hHi, hLo, wHi, wLo, 0x00, 0x01});
                 Thread.sleep(30);
 
-                // 6. Send Bitmap Rows
                 int bytesPerRow = width / 8;
                 int[] pixels = new int[width * height];
                 bitmap.getPixels(pixels, 0, width, 0, 0, width, height);
@@ -337,14 +321,12 @@ public class NiimbotB1Printer {
                         System.arraycopy(rowBytes, 0, payload, 6, bytesPerRow);
                         sendPacket(0x85, payload);
                     }
-                    Thread.sleep(8); // Pacing delay to avoid buffer drops
+                    Thread.sleep(8);
                 }
 
-                // 7. PageEnd
                 Thread.sleep(20);
                 sendPacket(0xE3, new byte[]{0x01});
 
-                // 8. Wait and PrintEnd
                 Thread.sleep(600);
                 sendPacket(0xF3, new byte[]{0x01});
 
