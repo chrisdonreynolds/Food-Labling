@@ -23,7 +23,7 @@ jobs:
           # Automatically accept Android SDK licenses
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
           
-          # Download official Gradle 8.0.2 directly (completely avoids GitHub cache service outages)
+          # Download official Gradle 8.0.2 directly (avoids GitHub Actions cache outages)
           wget -q https://services.gradle.org/distributions/gradle-8.0.2-bin.zip
           unzip -q gradle-8.0.2-bin.zip
           echo "$GITHUB_WORKSPACE/gradle-8.0.2/bin" >> $GITHUB_PATH
