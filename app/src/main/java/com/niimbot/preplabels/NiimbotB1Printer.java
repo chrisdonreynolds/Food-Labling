@@ -33,7 +33,6 @@ public class NiimbotB1Printer {
 
     public interface PrinterListener {
         void onConnectionStateChange(boolean connected, String deviceName);
-        void onPrintProgress(String status);
         void onError(String message);
     }
 
@@ -46,12 +45,10 @@ public class NiimbotB1Printer {
     private boolean isConnected = false;
     private String connectedDeviceName = "";
 
-    // 40x30 mm Calibration:
-    // 384 px printhead; 40mm paper is 320 px wide with 32px margins
     public static final int HEAD_WIDTH = 384;
     public static final int LABEL_WIDTH = 320;
-    public static final int LABEL_HEIGHT = 240; // 30mm @ 203 DPI
-    public static final int OFFSET_X = (HEAD_WIDTH - LABEL_WIDTH) / 2; // 32 px margin
+    public static final int LABEL_HEIGHT = 240;
+    public static final int OFFSET_X = (HEAD_WIDTH - LABEL_WIDTH) / 2;
 
     public NiimbotB1Printer(Context context, PrinterListener listener) {
         this.context = context;
@@ -75,8 +72,6 @@ public class NiimbotB1Printer {
             return;
         }
 
-        notifyProgress("Scanning for Niimbot B1...");
-
         ScanCallback scanCallback = new ScanCallback() {
             @Override
             public void onScanResult(int callbackType, ScanResult result) {
@@ -97,12 +92,13 @@ public class NiimbotB1Printer {
         scanner.startScan(scanCallback);
         mainHandler.postDelayed(() -> {
             try { scanner.stopScan(scanCallback); } catch (Exception ignored) {}
-            if (!isConnected) notifyProgress("Disconnected");
+            if (!isConnected) {
+                notifyConnection(false, "");
+            }
         }, 8000);
     }
 
     private void connectToDevice(BluetoothDevice device) {
-        notifyProgress("Connecting to " + (device.getName() != null ? device.getName() : "B1") + "...");
         bluetoothGatt = device.connectGatt(context, false, gattCallback);
     }
 
@@ -198,8 +194,7 @@ public class NiimbotB1Printer {
     private void sendPacket(int cmd, byte[] data) {
         if (bluetoothGatt == null || printCharacteristic == null) return;
         byte[] pkt = makePacket(cmd, data);
-        
-        // Chunk packets into 20-byte slices for Android BLE compatibility
+
         for (int i = 0; i < pkt.length; i += 20) {
             int len = Math.min(20, pkt.length - i);
             byte[] chunk = new byte[len];
@@ -216,37 +211,24 @@ public class NiimbotB1Printer {
         Canvas canvas = new Canvas(bitmap);
         canvas.drawColor(Color.WHITE);
 
-        // Centered border on the 40mm area
-        Paint borderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        borderPaint.setColor(Color.BLACK);
-        borderPaint.setStyle(Paint.Style.STROKE);
-        borderPaint.setStrokeWidth(3f);
-        
-
-        borderPaint.setStrokeWidth(1f);
-        
-
-        // Centered Item Name
         Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         textPaint.setColor(Color.BLACK);
         textPaint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
         textPaint.setTextAlign(Paint.Align.CENTER);
-        
-        float textSize = 30f;
+
+        float textSize = 32f;
         textPaint.setTextSize(textSize);
-        while (textPaint.measureText(name) > (LABEL_WIDTH - 40) && textSize > 18) {
+        while (textPaint.measureText(name) > (LABEL_WIDTH - 24) && textSize > 18) {
             textSize -= 2f;
             textPaint.setTextSize(textSize);
         }
         canvas.drawText(name, HEAD_WIDTH / 2f, 48, textPaint);
 
-        // Divider
         Paint linePaint = new Paint();
         linePaint.setColor(Color.BLACK);
-        linePaint.setStrokeWidth(2f);
-        canvas.drawLine(OFFSET_X + 16, 68, OFFSET_X + LABEL_WIDTH - 16, 68, linePaint);
+        linePaint.setStrokeWidth(2.5f);
+        canvas.drawLine(OFFSET_X + 10, 70, OFFSET_X + LABEL_WIDTH - 10, 70, linePaint);
 
-        // Dates
         SimpleDateFormat sdf = new SimpleDateFormat("MM/dd/yyyy", Locale.US);
         Date now = new Date();
         Calendar cal = Calendar.getInstance();
@@ -255,16 +237,11 @@ public class NiimbotB1Printer {
         Date outDate = cal.getTime();
 
         textPaint.setTextAlign(Paint.Align.LEFT);
-        textPaint.setTextSize(22f);
-        canvas.drawText("Prep Date: " + sdf.format(now), OFFSET_X + 20, 118, textPaint);
-
         textPaint.setTextSize(24f);
-        canvas.drawText("Out Date:  " + sdf.format(outDate), OFFSET_X + 20, 168, textPaint);
+        canvas.drawText("Prep Date: " + sdf.format(now), OFFSET_X + 16, 125, textPaint);
 
-        textPaint.setTextAlign(Paint.Align.RIGHT);
-        textPaint.setTextSize(15f);
-        textPaint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.ITALIC));
-        
+        textPaint.setTextSize(26f);
+        canvas.drawText("Out Date:  " + sdf.format(outDate), OFFSET_X + 16, 180, textPaint);
 
         return bitmap;
     }
@@ -277,9 +254,8 @@ public class NiimbotB1Printer {
 
         new Thread(() -> {
             try {
-                notifyProgress("Printing 40x30mm label...");
-                int width = bitmap.getWidth();   // 384
-                int height = bitmap.getHeight(); // 240
+                int width = bitmap.getWidth();
+                int height = bitmap.getHeight();
 
                 sendPacket(0x21, new byte[]{0x04});
                 Thread.sleep(20);
@@ -300,16 +276,17 @@ public class NiimbotB1Printer {
                 sendPacket(0x13, new byte[]{hHi, hLo, wHi, wLo, 0x00, 0x01});
                 Thread.sleep(30);
 
-                int bytesPerRow = width / 8; // 48 bytes
+                int bytesPerRow = width / 8;
                 int[] pixels = new int[width * height];
                 bitmap.getPixels(pixels, 0, width, 0, 0, width, height);
 
                 for (int y = 0; y < height; y++) {
                     byte[] rowBytes = new byte[bytesPerRow];
                     int blackCount = 0;
+                    int offset = y * width;
 
                     for (int x = 0; x < width; x++) {
-                        int pixel = pixels[y * width + x];
+                        int pixel = pixels[offset + x];
                         int r = (pixel >> 16) & 0xFF;
                         int g = (pixel >> 8) & 0xFF;
                         int b = pixel & 0xFF;
@@ -324,31 +301,27 @@ public class NiimbotB1Printer {
                     byte yHi = (byte) ((y >> 8) & 0xFF);
                     byte yLo = (byte) (y & 0xFF);
 
-                    if (blackCount == 0) {
-                        sendPacket(0x84, new byte[]{yHi, yLo, 0x01});
-                    } else {
-                        byte c2 = (byte) (blackCount & 0xFF);
-                        byte c3 = (byte) ((blackCount >> 8) & 0xFF);
-                        byte[] payload = new byte[6 + bytesPerRow];
-                        payload[0] = yHi;
-                        payload[1] = yLo;
-                        payload[2] = 0x00;
-                        payload[3] = c2;
-                        payload[4] = c3;
-                        payload[5] = 0x01;
-                        System.arraycopy(rowBytes, 0, payload, 6, bytesPerRow);
-                        sendPacket(0x85, payload);
-                    }
-                    Thread.sleep(6);
+                    byte c2 = (byte) (blackCount & 0xFF);
+                    byte c3 = (byte) ((blackCount >> 8) & 0xFF);
+                    byte[] payload = new byte[6 + bytesPerRow];
+                    payload[0] = yHi;
+                    payload[1] = yLo;
+                    payload[2] = 0x00;
+                    payload[3] = c2;
+                    payload[4] = c3;
+                    payload[5] = 0x01;
+                    System.arraycopy(rowBytes, 0, payload, 6, bytesPerRow);
+                    sendPacket(0x85, payload);
+
+                    Thread.sleep(8);
                 }
 
                 Thread.sleep(30);
                 sendPacket(0xE3, new byte[]{0x01});
 
-                Thread.sleep(800);
+                Thread.sleep(1500);
                 sendPacket(0xF3, new byte[]{0x01});
 
-                notifyProgress("Print complete!");
             } catch (Exception e) {
                 notifyError("Printing failed: " + e.getMessage());
             }
@@ -358,12 +331,6 @@ public class NiimbotB1Printer {
     private void notifyConnection(boolean connected, String name) {
         mainHandler.post(() -> {
             if (listener != null) listener.onConnectionStateChange(connected, name);
-        });
-    }
-
-    private void notifyProgress(String status) {
-        mainHandler.post(() -> {
-            if (listener != null) listener.onPrintProgress(status);
         });
     }
 
