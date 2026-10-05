@@ -16,6 +16,7 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Typeface;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 
@@ -45,6 +46,13 @@ public class NiimbotB1Printer {
     private boolean isConnected = false;
     private String connectedDeviceName = "";
 
+    // 40x30 mm Calibration:
+    // 384 px printhead; 40mm paper is 320 px wide with 32px margins
+    public static final int HEAD_WIDTH = 384;
+    public static final int LABEL_WIDTH = 320;
+    public static final int LABEL_HEIGHT = 240; // 30mm @ 203 DPI
+    public static final int OFFSET_X = (HEAD_WIDTH - LABEL_WIDTH) / 2; // 32 px margin
+
     public NiimbotB1Printer(Context context, PrinterListener listener) {
         this.context = context;
         this.listener = listener;
@@ -52,13 +60,8 @@ public class NiimbotB1Printer {
         this.bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
     }
 
-    public boolean isConnected() {
-        return isConnected;
-    }
-
-    public String getConnectedDeviceName() {
-        return connectedDeviceName;
-    }
+    public boolean isConnected() { return isConnected; }
+    public String getConnectedDeviceName() { return connectedDeviceName; }
 
     public void startScanAndConnect() {
         if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled()) {
@@ -94,9 +97,7 @@ public class NiimbotB1Printer {
         scanner.startScan(scanCallback);
         mainHandler.postDelayed(() -> {
             try { scanner.stopScan(scanCallback); } catch (Exception ignored) {}
-            if (!isConnected) {
-                notifyProgress("Disconnected");
-            }
+            if (!isConnected) notifyProgress("Disconnected");
         }, 8000);
     }
 
@@ -120,12 +121,20 @@ public class NiimbotB1Printer {
         @Override
         public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    gatt.requestMtu(512);
+                }
                 gatt.discoverServices();
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 isConnected = false;
                 connectedDeviceName = "";
                 notifyConnection(false, "");
             }
+        }
+
+        @Override
+        public void onMtuChanged(BluetoothGatt gatt, int mtu, int status) {
+            gatt.discoverServices();
         }
 
         @Override
@@ -189,6 +198,8 @@ public class NiimbotB1Printer {
     private void sendPacket(int cmd, byte[] data) {
         if (bluetoothGatt == null || printCharacteristic == null) return;
         byte[] pkt = makePacket(cmd, data);
+        
+        // Chunk packets into 20-byte slices for Android BLE compatibility
         for (int i = 0; i < pkt.length; i += 20) {
             int len = Math.min(20, pkt.length - i);
             byte[] chunk = new byte[len];
@@ -201,40 +212,41 @@ public class NiimbotB1Printer {
     }
 
     public Bitmap generateLabelBitmap(String name, int days, String durationLabel) {
-        int width = 384;
-        int height = 240;
-
-        Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+        Bitmap bitmap = Bitmap.createBitmap(HEAD_WIDTH, LABEL_HEIGHT, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(bitmap);
         canvas.drawColor(Color.WHITE);
 
+        // Centered border on the 40mm area
         Paint borderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         borderPaint.setColor(Color.BLACK);
         borderPaint.setStyle(Paint.Style.STROKE);
         borderPaint.setStrokeWidth(3f);
-        canvas.drawRect(6, 6, width - 6, height - 6, borderPaint);
+        canvas.drawRect(OFFSET_X + 4, 4, OFFSET_X + LABEL_WIDTH - 4, LABEL_HEIGHT - 4, borderPaint);
 
         borderPaint.setStrokeWidth(1f);
-        canvas.drawRect(10, 10, width - 10, height - 10, borderPaint);
+        canvas.drawRect(OFFSET_X + 8, 8, OFFSET_X + LABEL_WIDTH - 8, LABEL_HEIGHT - 8, borderPaint);
 
+        // Centered Item Name
         Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         textPaint.setColor(Color.BLACK);
         textPaint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
         textPaint.setTextAlign(Paint.Align.CENTER);
         
-        float textSize = 34f;
+        float textSize = 30f;
         textPaint.setTextSize(textSize);
-        while (textPaint.measureText(name) > 340 && textSize > 20) {
+        while (textPaint.measureText(name) > (LABEL_WIDTH - 40) && textSize > 18) {
             textSize -= 2f;
             textPaint.setTextSize(textSize);
         }
-        canvas.drawText(name, width / 2f, 52, textPaint);
+        canvas.drawText(name, HEAD_WIDTH / 2f, 48, textPaint);
 
+        // Divider
         Paint linePaint = new Paint();
         linePaint.setColor(Color.BLACK);
         linePaint.setStrokeWidth(2f);
-        canvas.drawLine(24, 74, width - 24, 74, linePaint);
+        canvas.drawLine(OFFSET_X + 16, 68, OFFSET_X + LABEL_WIDTH - 16, 68, linePaint);
 
+        // Dates
         SimpleDateFormat sdf = new SimpleDateFormat("MM/dd/yyyy", Locale.US);
         Date now = new Date();
         Calendar cal = Calendar.getInstance();
@@ -243,16 +255,16 @@ public class NiimbotB1Printer {
         Date outDate = cal.getTime();
 
         textPaint.setTextAlign(Paint.Align.LEFT);
-        textPaint.setTextSize(24f);
-        canvas.drawText("Prep Date: " + sdf.format(now), 32, 126, textPaint);
+        textPaint.setTextSize(22f);
+        canvas.drawText("Prep Date: " + sdf.format(now), OFFSET_X + 20, 118, textPaint);
 
-        textPaint.setTextSize(26f);
-        canvas.drawText("Out Date:  " + sdf.format(outDate), 32, 178, textPaint);
+        textPaint.setTextSize(24f);
+        canvas.drawText("Out Date:  " + sdf.format(outDate), OFFSET_X + 20, 168, textPaint);
 
         textPaint.setTextAlign(Paint.Align.RIGHT);
-        textPaint.setTextSize(16f);
+        textPaint.setTextSize(15f);
         textPaint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.ITALIC));
-        canvas.drawText("(" + durationLabel + ")", width - 32, 212, textPaint);
+        canvas.drawText("(" + durationLabel + ")", OFFSET_X + LABEL_WIDTH - 20, 208, textPaint);
 
         return bitmap;
     }
@@ -265,9 +277,9 @@ public class NiimbotB1Printer {
 
         new Thread(() -> {
             try {
-                notifyProgress("Printing label...");
-                int width = bitmap.getWidth();
-                int height = bitmap.getHeight();
+                notifyProgress("Printing 40x30mm label...");
+                int width = bitmap.getWidth();   // 384
+                int height = bitmap.getHeight(); // 240
 
                 sendPacket(0x21, new byte[]{0x04});
                 Thread.sleep(20);
@@ -288,7 +300,7 @@ public class NiimbotB1Printer {
                 sendPacket(0x13, new byte[]{hHi, hLo, wHi, wLo, 0x00, 0x01});
                 Thread.sleep(30);
 
-                int bytesPerRow = width / 8;
+                int bytesPerRow = width / 8; // 48 bytes
                 int[] pixels = new int[width * height];
                 bitmap.getPixels(pixels, 0, width, 0, 0, width, height);
 
@@ -330,7 +342,7 @@ public class NiimbotB1Printer {
                     Thread.sleep(8);
                 }
 
-                Thread.sleep(20);
+                Thread.sleep(30);
                 sendPacket(0xE3, new byte[]{0x01});
 
                 Thread.sleep(1500);
