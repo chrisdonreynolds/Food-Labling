@@ -33,7 +33,7 @@ import java.util.List;
 
 public class MainActivity extends AppCompatActivity implements NiimbotB1Printer.PrinterListener, PrepAdapter.AdapterListener {
 
-    private static final String PREFS_NAME = "NiimbotPrepPrefs";
+    private static final String PREFS_NAME = "NiimbotPrepPrefs_Fast";
     private static final String KEY_ITEMS = "prep_items_json";
     private static final int PERMISSION_REQ_CODE = 101;
 
@@ -272,11 +272,22 @@ public class MainActivity extends AppCompatActivity implements NiimbotB1Printer.
 
     @Override
     public void onPrintProgress(String status) {
-        // Ignored: Header status strictly displays Connected or Disconnected
+        if ("PRINTING".equals(status)) {
+            statusDot.setBackgroundColor(Color.parseColor("#F59E0B"));
+        } else if ("DONE".equals(status)) {
+            if (printer != null && printer.isConnected()) {
+                statusDot.setBackgroundColor(Color.parseColor("#10B981"));
+            }
+        }
     }
 
     @Override
     public void onError(String message) {
+        if (printer != null && printer.isConnected()) {
+            statusDot.setBackgroundColor(Color.parseColor("#10B981"));
+        } else {
+            statusDot.setBackgroundColor(Color.parseColor("#64748B"));
+        }
         Toast.makeText(this, message, Toast.LENGTH_LONG).show();
     }
 }

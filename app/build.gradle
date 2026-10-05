@@ -7,11 +7,11 @@ android {
     compileSdk 33
 
     defaultConfig {
-        applicationId "com.niimbot.preplabels"
+        applicationId "com.niimbot.preplabels.fast"
         minSdk 21
         targetSdk 33
-        versionCode 1
-        versionName "1.0"
+        versionCode 2
+        versionName "1.0-fast"
     }
 
     buildTypes {

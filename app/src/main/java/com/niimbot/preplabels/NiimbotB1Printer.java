@@ -203,7 +203,7 @@ public class NiimbotB1Printer {
             printCharacteristic.setValue(chunk);
             printCharacteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
             bluetoothGatt.writeCharacteristic(printCharacteristic);
-            try { Thread.sleep(4); } catch (Exception ignored) {}
+            try { Thread.sleep(2); } catch (Exception ignored) {}
         }
     }
 
@@ -255,27 +255,29 @@ public class NiimbotB1Printer {
 
         new Thread(() -> {
             try {
+                notifyProgress("PRINTING");
+
                 int width = bitmap.getWidth();
                 int height = bitmap.getHeight();
 
                 sendPacket(0x21, new byte[]{0x04});
-                Thread.sleep(20);
+                Thread.sleep(15);
 
                 sendPacket(0x23, new byte[]{0x01});
-                Thread.sleep(20);
+                Thread.sleep(15);
 
                 sendPacket(0x01, new byte[]{0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00});
-                Thread.sleep(30);
+                Thread.sleep(25);
 
                 sendPacket(0x03, new byte[]{0x01});
-                Thread.sleep(20);
+                Thread.sleep(15);
 
                 byte hHi = (byte) ((height >> 8) & 0xFF);
                 byte hLo = (byte) (height & 0xFF);
                 byte wHi = (byte) ((width >> 8) & 0xFF);
                 byte wLo = (byte) (width & 0xFF);
                 sendPacket(0x13, new byte[]{hHi, hLo, wHi, wLo, 0x00, 0x01});
-                Thread.sleep(30);
+                Thread.sleep(25);
 
                 int bytesPerRow = width / 8;
                 int[] pixels = new int[width * height];
@@ -314,16 +316,18 @@ public class NiimbotB1Printer {
                     System.arraycopy(rowBytes, 0, payload, 6, bytesPerRow);
                     sendPacket(0x85, payload);
 
-                    Thread.sleep(8);
+                    Thread.sleep(5);
                 }
 
-                Thread.sleep(30);
+                Thread.sleep(25);
                 sendPacket(0xE3, new byte[]{0x01});
 
-                Thread.sleep(1500);
+                Thread.sleep(1100);
                 sendPacket(0xF3, new byte[]{0x01});
 
+                notifyProgress("DONE");
             } catch (Exception e) {
+                notifyProgress("DONE");
                 notifyError("Printing failed: " + e.getMessage());
             }
         }).start();
