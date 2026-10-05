@@ -189,9 +189,15 @@ public class NiimbotB1Printer {
     private void sendPacket(int cmd, byte[] data) {
         if (bluetoothGatt == null || printCharacteristic == null) return;
         byte[] pkt = makePacket(cmd, data);
-        printCharacteristic.setValue(pkt);
-        printCharacteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
-        bluetoothGatt.writeCharacteristic(printCharacteristic);
+        for (int i = 0; i < pkt.length; i += 20) {
+            int len = Math.min(20, pkt.length - i);
+            byte[] chunk = new byte[len];
+            System.arraycopy(pkt, i, chunk, 0, len);
+            printCharacteristic.setValue(chunk);
+            printCharacteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
+            bluetoothGatt.writeCharacteristic(printCharacteristic);
+            try { Thread.sleep(4); } catch (Exception ignored) {}
+        }
     }
 
     public Bitmap generateLabelBitmap(String name, int days, String durationLabel) {
@@ -263,7 +269,7 @@ public class NiimbotB1Printer {
                 int width = bitmap.getWidth();
                 int height = bitmap.getHeight();
 
-                sendPacket(0x21, new byte[]{0x03});
+                sendPacket(0x21, new byte[]{0x04});
                 Thread.sleep(20);
 
                 sendPacket(0x23, new byte[]{0x01});
@@ -327,7 +333,7 @@ public class NiimbotB1Printer {
                 Thread.sleep(20);
                 sendPacket(0xE3, new byte[]{0x01});
 
-                Thread.sleep(600);
+                Thread.sleep(1500);
                 sendPacket(0xF3, new byte[]{0x01});
 
                 notifyProgress("Print complete!");
