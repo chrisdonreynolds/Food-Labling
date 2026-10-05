@@ -68,16 +68,14 @@ public class MainActivity extends AppCompatActivity implements NiimbotB1Printer.
 
         loadSavedItems();
 
-        // 2 standard-sized columns (each ~half screen width)
         GridLayoutManager gridLayoutManager = new GridLayoutManager(this, 2);
         gridLayoutManager.setSpanSizeLookup(new GridLayoutManager.SpanSizeLookup() {
             @Override
             public int getSpanSize(int position) {
-                // If it's the appended "+ Add New Item" button, span both columns (2)
                 if (adapter != null && adapter.getItemViewType(position) == PrepAdapter.TYPE_ADD_BUTTON) {
                     return 2;
                 }
-                return 1; // Standard items occupy 1 column
+                return 1;
             }
         });
 
@@ -133,7 +131,7 @@ public class MainActivity extends AppCompatActivity implements NiimbotB1Printer.
             if (allGranted) {
                 printer.startScanAndConnect();
             } else {
-                Toast.makeText(this, "Bluetooth permissions are required to connect", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "Bluetooth permissions are required", Toast.LENGTH_SHORT).show();
             }
         }
     }
@@ -197,7 +195,6 @@ public class MainActivity extends AppCompatActivity implements NiimbotB1Printer.
 
         Bitmap label = printer.generateLabelBitmap(item.getName(), item.getDays(), item.getDurationLabel());
         printer.printLabel(label);
-        Toast.makeText(this, "Printing " + item.getName() + "...", Toast.LENGTH_SHORT).show();
     }
 
     @Override
@@ -229,7 +226,7 @@ public class MainActivity extends AppCompatActivity implements NiimbotB1Printer.
             this, android.R.layout.simple_spinner_dropdown_item, spinnerLabels
         );
         spDuration.setAdapter(spinnerAdapter);
-        spDuration.setSelection(2); // default 3 days
+        spDuration.setSelection(2);
 
         AlertDialog dialog = new AlertDialog.Builder(this)
             .setView(dialogView)
@@ -264,18 +261,13 @@ public class MainActivity extends AppCompatActivity implements NiimbotB1Printer.
             tvStatus.setText("Connected");
             btnConnect.setText("Disconnect");
             btnConnect.setBackgroundColor(Color.parseColor("#334155"));
-            Toast.makeText(this, "Connected to " + deviceName, Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Connected", Toast.LENGTH_SHORT).show();
         } else {
             statusDot.setBackgroundColor(Color.parseColor("#64748B"));
             tvStatus.setText("Disconnected");
             btnConnect.setText("Connect");
             btnConnect.setBackgroundColor(Color.parseColor("#3B82F6"));
         }
-    }
-
-    @Override
-    public void onPrintProgress(String status) {
-        // Status display remains on connection state
     }
 
     @Override
