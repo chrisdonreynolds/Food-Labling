@@ -200,8 +200,8 @@ public class NiimbotB1Printer {
         byte[] pkt = makePacket(cmd, data);
         
         // Chunk packets into 20-byte slices for Android BLE compatibility
-        for (int i = 0; i < pkt.length; i += 20) {
-            int len = Math.min(20, pkt.length - i);
+        for (int i = 0; i < pkt.length; i += 240) {
+            int len = Math.min(240, pkt.length - i);
             byte[] chunk = new byte[len];
             System.arraycopy(pkt, i, chunk, 0, len);
             printCharacteristic.setValue(chunk);
@@ -221,10 +221,10 @@ public class NiimbotB1Printer {
         borderPaint.setColor(Color.BLACK);
         borderPaint.setStyle(Paint.Style.STROKE);
         borderPaint.setStrokeWidth(3f);
-        canvas.drawRect(OFFSET_X + 4, 4, OFFSET_X + LABEL_WIDTH - 4, LABEL_HEIGHT - 4, borderPaint);
+        
 
         borderPaint.setStrokeWidth(1f);
-        canvas.drawRect(OFFSET_X + 8, 8, OFFSET_X + LABEL_WIDTH - 8, LABEL_HEIGHT - 8, borderPaint);
+        
 
         // Centered Item Name
         Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -264,7 +264,7 @@ public class NiimbotB1Printer {
         textPaint.setTextAlign(Paint.Align.RIGHT);
         textPaint.setTextSize(15f);
         textPaint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.ITALIC));
-        canvas.drawText("(" + durationLabel + ")", OFFSET_X + LABEL_WIDTH - 20, 208, textPaint);
+        
 
         return bitmap;
     }
@@ -339,13 +339,13 @@ public class NiimbotB1Printer {
                         System.arraycopy(rowBytes, 0, payload, 6, bytesPerRow);
                         sendPacket(0x85, payload);
                     }
-                    Thread.sleep(8);
+                    Thread.sleep(2);
                 }
 
                 Thread.sleep(30);
                 sendPacket(0xE3, new byte[]{0x01});
 
-                Thread.sleep(1500);
+                Thread.sleep(400);
                 sendPacket(0xF3, new byte[]{0x01});
 
                 notifyProgress("Print complete!");
