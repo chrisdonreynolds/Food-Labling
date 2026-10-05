@@ -200,8 +200,8 @@ public class NiimbotB1Printer {
         byte[] pkt = makePacket(cmd, data);
         
         // Chunk packets into 20-byte slices for Android BLE compatibility
-        for (int i = 0; i < pkt.length; i += 240) {
-            int len = Math.min(240, pkt.length - i);
+        for (int i = 0; i < pkt.length; i += 20) {
+            int len = Math.min(20, pkt.length - i);
             byte[] chunk = new byte[len];
             System.arraycopy(pkt, i, chunk, 0, len);
             printCharacteristic.setValue(chunk);
@@ -339,13 +339,13 @@ public class NiimbotB1Printer {
                         System.arraycopy(rowBytes, 0, payload, 6, bytesPerRow);
                         sendPacket(0x85, payload);
                     }
-                    Thread.sleep(2);
+                    Thread.sleep(6);
                 }
 
                 Thread.sleep(30);
                 sendPacket(0xE3, new byte[]{0x01});
 
-                Thread.sleep(400);
+                Thread.sleep(800);
                 sendPacket(0xF3, new byte[]{0x01});
 
                 notifyProgress("Print complete!");
