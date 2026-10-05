@@ -261,7 +261,7 @@ public class MainActivity extends AppCompatActivity implements NiimbotB1Printer.
     public void onConnectionStateChange(boolean connected, String deviceName) {
         if (connected) {
             statusDot.setBackgroundColor(Color.parseColor("#10B981"));
-            tvStatus.setText(deviceName);
+            tvStatus.setText("Connected");
             btnConnect.setText("Disconnect");
             btnConnect.setBackgroundColor(Color.parseColor("#334155"));
             Toast.makeText(this, "Connected to " + deviceName, Toast.LENGTH_SHORT).show();
@@ -275,7 +275,7 @@ public class MainActivity extends AppCompatActivity implements NiimbotB1Printer.
 
     @Override
     public void onPrintProgress(String status) {
-        tvStatus.setText(status);
+        // Status display remains on connection state
     }
 
     @Override
