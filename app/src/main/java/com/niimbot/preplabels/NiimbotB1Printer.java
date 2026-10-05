@@ -5,6 +5,7 @@ import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothGatt;
 import android.bluetooth.BluetoothGattCallback;
 import android.bluetooth.BluetoothGattCharacteristic;
+import android.bluetooth.BluetoothGattDescriptor;
 import android.bluetooth.BluetoothGattService;
 import android.bluetooth.BluetoothProfile;
 import android.bluetooth.le.BluetoothLeScanner;
@@ -25,11 +26,14 @@ import java.util.Calendar;
 import java.util.Date;
 import java.util.Locale;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class NiimbotB1Printer {
 
     public static final UUID SERVICE_UUID = UUID.fromString("e7810a71-73ae-499d-8c15-faa9aef0c3f2");
     public static final UUID CHAR_UUID = UUID.fromString("bef8d6c9-9c21-4c9e-b632-bd58c1009f9f");
+    public static final UUID CCCD_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
 
     public interface PrinterListener {
         void onConnectionStateChange(boolean connected, String deviceName);
@@ -45,6 +49,10 @@ public class NiimbotB1Printer {
     private PrinterListener listener;
     private boolean isConnected = false;
     private String connectedDeviceName = "";
+
+    // Track printer progress responses
+    private final AtomicInteger lastReportedPage = new AtomicInteger(0);
+    private final AtomicBoolean printComplete = new AtomicBoolean(false);
 
     public static final int HEAD_WIDTH = 384;
     public static final int LABEL_WIDTH = 320;
@@ -79,7 +87,7 @@ public class NiimbotB1Printer {
                 BluetoothDevice device = result.getDevice();
                 String name = device.getName();
                 if (name != null && (name.startsWith("B1") || name.startsWith("NIIMBOT") || name.startsWith("B"))) {
-                    scanner.stopScan(this);
+                    try { scanner.stopScan(this); } catch (Exception ignored) {}
                     connectToDevice(device);
                 }
             }
@@ -105,8 +113,10 @@ public class NiimbotB1Printer {
 
     public void disconnect() {
         if (bluetoothGatt != null) {
-            bluetoothGatt.disconnect();
-            bluetoothGatt.close();
+            try {
+                bluetoothGatt.disconnect();
+                bluetoothGatt.close();
+            } catch (Exception ignored) {}
             bluetoothGatt = null;
         }
         isConnected = false;
@@ -119,10 +129,11 @@ public class NiimbotB1Printer {
         public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                    gatt.requestMtu(512);
                     gatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH);
+                    gatt.requestMtu(512);
+                } else {
+                    gatt.discoverServices();
                 }
-                gatt.discoverServices();
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 isConnected = false;
                 connectedDeviceName = "";
@@ -132,6 +143,7 @@ public class NiimbotB1Printer {
 
         @Override
         public void onMtuChanged(BluetoothGatt gatt, int mtu, int status) {
+            // Once MTU negotiation completes, discover services
             gatt.discoverServices();
         }
 
@@ -150,14 +162,55 @@ public class NiimbotB1Printer {
                 }
 
                 if (printCharacteristic != null) {
-                    isConnected = true;
-                    connectedDeviceName = gatt.getDevice().getName();
-                    if (connectedDeviceName == null) connectedDeviceName = "Niimbot B1";
-
-                    sendPacket(0xC1, new byte[]{0x01});
-                    notifyConnection(true, connectedDeviceName);
+                    // Subscribe to BLE notifications to receive printer responses
+                    gatt.setCharacteristicNotification(printCharacteristic, true);
+                    BluetoothGattDescriptor descriptor = printCharacteristic.getDescriptor(CCCD_UUID);
+                    if (descriptor != null) {
+                        descriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
+                        gatt.writeDescriptor(descriptor);
+                    } else {
+                        finishConnectionSetup(gatt);
+                    }
                 } else {
                     notifyError("Niimbot print characteristic not found");
+                }
+            }
+        }
+
+        @Override
+        public void onDescriptorWrite(BluetoothGatt gatt, BluetoothGattDescriptor descriptor, int status) {
+            finishConnectionSetup(gatt);
+        }
+
+        private void finishConnectionSetup(BluetoothGatt gatt) {
+            isConnected = true;
+            connectedDeviceName = gatt.getDevice().getName();
+            if (connectedDeviceName == null || connectedDeviceName.isEmpty()) {
+                connectedDeviceName = "Niimbot B1";
+            }
+            sendPacket(0xC1, new byte[]{0x01});
+            notifyConnection(true, connectedDeviceName);
+        }
+
+        @Override
+        public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
+            byte[] value = characteristic.getValue();
+            if (value == null || value.length < 5) return;
+            // Parse response packet: 55 55 [CMD] [LEN] [DATA...] [CS] AA AA
+            if (value[0] == (byte) 0x55 && value[1] == (byte) 0x55) {
+                int cmd = value[2] & 0xFF;
+                int len = value[3] & 0xFF;
+                if (cmd == 0xB3 && len >= 2 && value.length >= 6) { // In_PrintStatus
+                    int pageIndex = ((value[4] & 0xFF) << 8) | (value[5] & 0xFF);
+                    lastReportedPage.set(pageIndex);
+                    if (pageIndex >= 1) {
+                        printComplete.set(true);
+                    }
+                } else if (cmd == 0xF4) { // In_PrintEnd
+                    printComplete.set(true);
+                } else if (cmd == 0xDB) { // In_PrintError
+                    int errCode = (len > 0 && value.length > 4) ? (value[4] & 0xFF) : -1;
+                    notifyError("Printer error: code " + errCode);
                 }
             }
         }
@@ -193,25 +246,17 @@ public class NiimbotB1Printer {
         return pkt;
     }
 
-    private void sendPacket(int cmd, byte[] data) {
+    private synchronized void sendPacket(int cmd, byte[] data) {
         if (bluetoothGatt == null || printCharacteristic == null) return;
         byte[] pkt = makePacket(cmd, data);
-
-        for (int i = 0; i < pkt.length; i += 20) {
-            int len = Math.min(20, pkt.length - i);
-            byte[] chunk = new byte[len];
-            System.arraycopy(pkt, i, chunk, 0, len);
-            printCharacteristic.setValue(chunk);
-            printCharacteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
-            
-            boolean sent = bluetoothGatt.writeCharacteristic(printCharacteristic);
-            int retries = 0;
-            while (!sent && retries < 10) {
-                try { Thread.sleep(4); } catch (Exception ignored) {}
-                sent = bluetoothGatt.writeCharacteristic(printCharacteristic);
-                retries++;
-            }
-            try { Thread.sleep(4); } catch (Exception ignored) {}
+        printCharacteristic.setValue(pkt);
+        printCharacteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
+        boolean sent = bluetoothGatt.writeCharacteristic(printCharacteristic);
+        int retries = 0;
+        while (!sent && retries < 10) {
+            try { Thread.sleep(5); } catch (Exception ignored) {}
+            sent = bluetoothGatt.writeCharacteristic(printCharacteristic);
+            retries++;
         }
     }
 
@@ -250,7 +295,7 @@ public class NiimbotB1Printer {
         canvas.drawText("Prep Date: " + sdf.format(now), OFFSET_X + 16, 125, textPaint);
 
         textPaint.setTextSize(26f);
-        canvas.drawText("Out Date:  " + sdf.format(outDate), OFFSET_X + 16, 180, textPaint);
+        canvas.drawText("Out Date: " + sdf.format(outDate), OFFSET_X + 16, 180, textPaint);
 
         return bitmap;
     }
@@ -264,36 +309,43 @@ public class NiimbotB1Printer {
         new Thread(() -> {
             try {
                 notifyProgress("PRINTING");
+                lastReportedPage.set(0);
+                printComplete.set(false);
 
-                int width = bitmap.getWidth();   // 384
-                int height = bitmap.getHeight(); // 240
+                int width = bitmap.getWidth();   // 384 (printhead width)
+                int height = bitmap.getHeight(); // 240 (feed length)
 
-                sendPacket(0x21, new byte[]{0x04});
-                Thread.sleep(15);
+                // 1. SetDensity: 3 (standard)
+                sendPacket(0x21, new byte[]{0x03});
+                Thread.sleep(20);
 
+                // 2. SetLabelType: 1 (gapped label)
                 sendPacket(0x23, new byte[]{0x01});
-                Thread.sleep(15);
+                Thread.sleep(20);
 
+                // 3. PrintStart: 7 bytes [totalPages(u16), 0, 0, 0, 0, pageColor]
                 sendPacket(0x01, new byte[]{0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00});
-                Thread.sleep(25);
+                Thread.sleep(30);
 
+                // 4. PageStart: [0x01]
                 sendPacket(0x03, new byte[]{0x01});
-                Thread.sleep(15);
+                Thread.sleep(20);
 
+                // 5. SetPageSize: 6 bytes [rows(u16), cols(u16), copies(u16)]
                 byte hHi = (byte) ((height >> 8) & 0xFF);
                 byte hLo = (byte) (height & 0xFF);
                 byte wHi = (byte) ((width >> 8) & 0xFF);
                 byte wLo = (byte) (width & 0xFF);
                 sendPacket(0x13, new byte[]{hHi, hLo, wHi, wLo, 0x00, 0x01});
-                Thread.sleep(25);
+                Thread.sleep(30);
 
-                int bytesPerRow = width / 8;
+                // 6. Send bitmap rows (0x85)
+                int bytesPerRow = width / 8; // 48 bytes
                 int[] pixels = new int[width * height];
                 bitmap.getPixels(pixels, 0, width, 0, 0, width, height);
 
                 for (int y = 0; y < height; y++) {
                     byte[] rowBytes = new byte[bytesPerRow];
-                    int blackCount = 0;
                     int offset = y * width;
 
                     for (int x = 0; x < width; x++) {
@@ -305,40 +357,62 @@ public class NiimbotB1Printer {
 
                         if (lum < 128) {
                             rowBytes[x / 8] |= (byte) (1 << (7 - (x % 8)));
-                            blackCount++;
                         }
+                    }
+
+                    // Count black pixels in 3 chunks (Split Mode: 16 bytes each for 384 px)
+                    int c1 = 0, c2 = 0, c3 = 0;
+                    for (int x = 0; x < 128; x++) {
+                        if ((rowBytes[x / 8] & (1 << (7 - (x % 8)))) != 0) c1++;
+                    }
+                    for (int x = 128; x < 256; x++) {
+                        if ((rowBytes[x / 8] & (1 << (7 - (x % 8)))) != 0) c2++;
+                    }
+                    for (int x = 256; x < 384; x++) {
+                        if ((rowBytes[x / 8] & (1 << (7 - (x % 8)))) != 0) c3++;
                     }
 
                     byte yHi = (byte) ((y >> 8) & 0xFF);
                     byte yLo = (byte) (y & 0xFF);
 
-                    byte c2 = (byte) (blackCount & 0xFF);
-                    byte c3 = (byte) ((blackCount >> 8) & 0xFF);
                     byte[] payload = new byte[6 + bytesPerRow];
                     payload[0] = yHi;
                     payload[1] = yLo;
-                    payload[2] = 0x00;
-                    payload[3] = c2;
-                    payload[4] = c3;
-                    payload[5] = 0x01;
+                    payload[2] = (byte) Math.min(255, c1);
+                    payload[3] = (byte) Math.min(255, c2);
+                    payload[4] = (byte) Math.min(255, c3);
+                    payload[5] = 0x01; // repeat count
                     System.arraycopy(rowBytes, 0, payload, 6, bytesPerRow);
-                    sendPacket(0x85, payload);
 
-                    Thread.sleep(8);
+                    sendPacket(0x85, payload);
+                    // Inter-row pacing
+                    Thread.sleep(4);
                 }
 
-                // Page data complete in printer buffer
-                Thread.sleep(25);
+                // 7. PageEnd: page data complete in printer buffer
+                Thread.sleep(30);
                 sendPacket(0xE3, new byte[]{0x01});
 
-                // Immediately trigger print execution (no 1500ms dead pause!)
-                Thread.sleep(50);
+                // 8. Poll PrintStatus (0xA3) until printer finishes physical printing
+                int pollAttempts = 0;
+                while (!printComplete.get() && pollAttempts < 25) {
+                    Thread.sleep(200);
+                    sendPacket(0xA3, new byte[]{0x01});
+                    pollAttempts++;
+                    if (lastReportedPage.get() >= 1) {
+                        break;
+                    }
+                }
+
+                // Fallback wait for physical motor to finish feeding sticker
+                if (pollAttempts < 5) {
+                    Thread.sleep(800);
+                }
+
+                // 9. PrintEnd: finalize print job
                 sendPacket(0xF3, new byte[]{0x01});
+                Thread.sleep(200);
 
-                // Keep yellow dot on while the physical motor feeds the sticker (~0.7s)
-                Thread.sleep(700);
-
-                // Printing complete -> dot returns to green
                 notifyProgress("DONE");
 
             } catch (Exception e) {
