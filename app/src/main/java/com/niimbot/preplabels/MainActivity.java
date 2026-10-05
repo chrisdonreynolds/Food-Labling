@@ -271,6 +271,11 @@ public class MainActivity extends AppCompatActivity implements NiimbotB1Printer.
     }
 
     @Override
+    public void onPrintProgress(String status) {
+        // Ignored: Header status strictly displays Connected or Disconnected
+    }
+
+    @Override
     public void onError(String message) {
         Toast.makeText(this, message, Toast.LENGTH_LONG).show();
     }

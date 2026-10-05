@@ -33,6 +33,7 @@ public class NiimbotB1Printer {
 
     public interface PrinterListener {
         void onConnectionStateChange(boolean connected, String deviceName);
+        void onPrintProgress(String status);
         void onError(String message);
     }
 
@@ -331,6 +332,12 @@ public class NiimbotB1Printer {
     private void notifyConnection(boolean connected, String name) {
         mainHandler.post(() -> {
             if (listener != null) listener.onConnectionStateChange(connected, name);
+        });
+    }
+
+    private void notifyProgress(String status) {
+        mainHandler.post(() -> {
+            if (listener != null) listener.onPrintProgress(status);
         });
     }
 
