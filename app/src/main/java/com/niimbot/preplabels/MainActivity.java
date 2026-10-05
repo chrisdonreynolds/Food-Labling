@@ -33,7 +33,7 @@ import java.util.List;
 
 public class MainActivity extends AppCompatActivity implements NiimbotB1Printer.PrinterListener, PrepAdapter.AdapterListener {
 
-    private static final String PREFS_NAME = "NiimbotPrepPrefs_Fast";
+    private static final String PREFS_NAME = "NiimbotPrepPrefs";
     private static final String KEY_ITEMS = "prep_items_json";
     private static final int PERMISSION_REQ_CODE = 101;
 
@@ -257,13 +257,13 @@ public class MainActivity extends AppCompatActivity implements NiimbotB1Printer.
     @Override
     public void onConnectionStateChange(boolean connected, String deviceName) {
         if (connected) {
-            statusDot.setBackgroundColor(Color.parseColor("#10B981"));
+            statusDot.setBackgroundColor(Color.parseColor("#10B981")); // Green
             tvStatus.setText("Connected");
             btnConnect.setText("Disconnect");
             btnConnect.setBackgroundColor(Color.parseColor("#334155"));
             Toast.makeText(this, "Connected", Toast.LENGTH_SHORT).show();
         } else {
-            statusDot.setBackgroundColor(Color.parseColor("#64748B"));
+            statusDot.setBackgroundColor(Color.parseColor("#64748B")); // Gray
             tvStatus.setText("Disconnected");
             btnConnect.setText("Connect");
             btnConnect.setBackgroundColor(Color.parseColor("#3B82F6"));
@@ -273,10 +273,10 @@ public class MainActivity extends AppCompatActivity implements NiimbotB1Printer.
     @Override
     public void onPrintProgress(String status) {
         if ("PRINTING".equals(status)) {
-            statusDot.setBackgroundColor(Color.parseColor("#F59E0B"));
+            statusDot.setBackgroundColor(Color.parseColor("#F59E0B")); // Yellow / Amber
         } else if ("DONE".equals(status)) {
             if (printer != null && printer.isConnected()) {
-                statusDot.setBackgroundColor(Color.parseColor("#10B981"));
+                statusDot.setBackgroundColor(Color.parseColor("#10B981")); // Green
             }
         }
     }

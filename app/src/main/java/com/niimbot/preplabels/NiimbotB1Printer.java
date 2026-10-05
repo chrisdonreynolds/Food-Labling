@@ -120,6 +120,7 @@ public class NiimbotB1Printer {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                     gatt.requestMtu(512);
+                    gatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH);
                 }
                 gatt.discoverServices();
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
@@ -202,8 +203,15 @@ public class NiimbotB1Printer {
             System.arraycopy(pkt, i, chunk, 0, len);
             printCharacteristic.setValue(chunk);
             printCharacteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
-            bluetoothGatt.writeCharacteristic(printCharacteristic);
-            try { Thread.sleep(2); } catch (Exception ignored) {}
+            
+            boolean sent = bluetoothGatt.writeCharacteristic(printCharacteristic);
+            int retries = 0;
+            while (!sent && retries < 10) {
+                try { Thread.sleep(4); } catch (Exception ignored) {}
+                sent = bluetoothGatt.writeCharacteristic(printCharacteristic);
+                retries++;
+            }
+            try { Thread.sleep(4); } catch (Exception ignored) {}
         }
     }
 
@@ -257,8 +265,8 @@ public class NiimbotB1Printer {
             try {
                 notifyProgress("PRINTING");
 
-                int width = bitmap.getWidth();
-                int height = bitmap.getHeight();
+                int width = bitmap.getWidth();   // 384
+                int height = bitmap.getHeight(); // 240
 
                 sendPacket(0x21, new byte[]{0x04});
                 Thread.sleep(15);
@@ -316,16 +324,23 @@ public class NiimbotB1Printer {
                     System.arraycopy(rowBytes, 0, payload, 6, bytesPerRow);
                     sendPacket(0x85, payload);
 
-                    Thread.sleep(5);
+                    Thread.sleep(8);
                 }
 
+                // Page data complete in printer buffer
                 Thread.sleep(25);
                 sendPacket(0xE3, new byte[]{0x01});
 
-                Thread.sleep(1100);
+                // Immediately trigger print execution (no 1500ms dead pause!)
+                Thread.sleep(50);
                 sendPacket(0xF3, new byte[]{0x01});
 
+                // Keep yellow dot on while the physical motor feeds the sticker (~0.7s)
+                Thread.sleep(700);
+
+                // Printing complete -> dot returns to green
                 notifyProgress("DONE");
+
             } catch (Exception e) {
                 notifyProgress("DONE");
                 notifyError("Printing failed: " + e.getMessage());
